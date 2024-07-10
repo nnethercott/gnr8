@@ -2,7 +2,7 @@ use anyhow::Result;
 use pyo3::prelude::*;
 use pyo3::types::PyAny;
 use pyo3_tch::PyTensor;
-use tch::{self, kind::Kind, Device, IndexOp, Tensor};
+use tch::{self, kind::Kind, Cuda, Device, IndexOp, Tensor};
 
 macro_rules! len {
     ($t: expr) => {{
@@ -76,6 +76,8 @@ pub fn tch_generate(model: &PyAny, input_ids: &Tensor, gc: GenerationConfig) -> 
 //pyfunction wrapper around tch_generate
 #[pyfunction]
 pub fn generate(model: &PyAny, input_ids: PyTensor) -> PyResult<PyTensor> {
+    println!("{}", Cuda::is_available());
+
     let gc = GenerationConfig::new(10);
     let output_ids = tch_generate(&model, &input_ids, gc).unwrap();
     Ok(PyTensor(output_ids))
