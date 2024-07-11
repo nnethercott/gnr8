@@ -31,7 +31,7 @@ pub struct GenerationConfig {
     pub ctx_size: usize,
     pub temperature: Option<f32>,
     pub top_k: Option<usize>,
-    pub device: Device,
+    // pub device: Device,
     // do_sample: Option<bool>,
     // eos_token_id: Option<usize>,
 }
@@ -42,17 +42,17 @@ impl GenerationConfig {
             ctx_size: 384,
             temperature: Some(1.0),
             top_k: None,
-            device: Device::Cpu,
+            // device: Device::Cuda(0),
         }
     }
 }
 
 // using a &Tensor since PyTensor impls Deref
 pub fn tch_generate(model: &PyAny, input_ids: &Tensor, gc: GenerationConfig) -> Result<Tensor> {
-    let _device = gc.device;
-    let mut input_ids = input_ids.shallow_clone(); //&Tensor to Tensor
+    let device = input_ids.device();
+    let mut input_ids = input_ids.shallow_clone().to(device); //&Tensor to Tensor
 
-    let mut new_tokens = Tensor::empty([1], (Kind::Int64, Device::Cpu));
+    let mut new_tokens = Tensor::empty([1], (Kind::Int64, device));
 
     while len!(new_tokens) <= gc.max_new_tokens as i64 {
         input_ids = input_ids.i((
@@ -69,16 +69,16 @@ pub fn tch_generate(model: &PyAny, input_ids: &Tensor, gc: GenerationConfig) -> 
         input_ids = Tensor::concat(&[input_ids, tok.unsqueeze(0)], -1);
     }
 
-    //Ok(new_tokens.i(1..)) // first token random from empty
-    Ok(input_ids) // first token random from empty
+    Ok(new_tokens.i(1..)) // first token random from empty
+    //Ok(input_ids) // first token random from empty
 }
 
 //pyfunction wrapper around tch_generate
 #[pyfunction]
 pub fn generate(model: &PyAny, input_ids: PyTensor) -> PyResult<PyTensor> {
-    println!("{}", Cuda::is_available());
+    //println!("{}", Cuda::is_available());
 
-    let gc = GenerationConfig::new(10);
+    let gc = GenerationConfig::new(64);
     let output_ids = tch_generate(&model, &input_ids, gc).unwrap();
     Ok(PyTensor(output_ids))
 }
