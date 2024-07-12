@@ -55,7 +55,7 @@ pub fn tch_generate(model: &PyAny, input_ids: &Tensor, gc: GenerationConfig) -> 
     let device = input_ids.device();
 
     let mut input_ids = input_ids.shallow_clone().to(device); //&Tensor to Tensor
-    let mut new_tokens = Tensor::empty([1], (Kind::Int64, device));
+    let mut new_tokens = Tensor::empty([1, 1], (Kind::Int64, device));
 
     while len!(new_tokens) <= gc.max_new_tokens as i64 {
         // truncate at model context window
@@ -72,11 +72,23 @@ pub fn tch_generate(model: &PyAny, input_ids: &Tensor, gc: GenerationConfig) -> 
         if gc.do_sample {
             tok = match gc.topk.as_ref() {
                 Some(k) => {
-                    let (_, i) = logits.topk(*k, -1, true, true);
-                    //FIXME: add where_self and index_put_ to build mask and hard set logits (see
-                    //chatgpt)
+                    let (_, idx) = logits.topk(*k, -1, true, true);
 
-                    Tensor::new()
+                    let mut mask = logits.zeros_like().to_dtype(Kind::Bool, true, false); // size bsz x n_embd
+
+                    // build bool mask
+                    for i in 0..len!(idx) {
+                        let _ = mask.index_put_(
+                            &[Some(Tensor::from(0)), Some(idx.i((0, i)))],
+                            &Tensor::from(true),
+                            false,
+                        );
+                    }
+
+                    // approx -float('inf')
+                    logits = logits.where_self(&mask, &Tensor::from(f64::MIN));
+
+                    logits.softmax(-1, Kind::Float).multinomial(1, false)
                 }
                 _ => todo!(),
             };
@@ -85,12 +97,13 @@ pub fn tch_generate(model: &PyAny, input_ids: &Tensor, gc: GenerationConfig) -> 
             tok = logits.argmax(-1, false);
         }
 
+        //FIXME: add flag for only new tokens or not
         new_tokens = Tensor::concat(&[new_tokens, tok.copy()], -1);
-        input_ids = Tensor::concat(&[input_ids, tok.unsqueeze(0)], -1);
+        input_ids = Tensor::concat(&[input_ids, tok], -1);
     }
 
-    Ok(new_tokens.i(1..)) // first token random from empty
-                          //Ok(input_ids) // first token random from empty
+    //Ok(new_tokens.i(1..)) // first token random from empty
+    Ok(input_ids) // first token random from empty
 }
 
 //pyfunction wrapper around tch_generate
@@ -99,7 +112,15 @@ pub fn generate(model: &PyAny, input_ids: PyTensor, kwargs: Option<&PyDict>) -> 
     //println!("{}", Cuda::is_available());
 
     //TODO: impl from or into for PyDict -> GenerationConfig
-    let gc = GenerationConfig::new(64);
+    //let gc = GenerationConfig::new(64);
+    let gc = GenerationConfig {
+        max_new_tokens: 32,
+        ctx_size: 384,
+        temperature: Some(1.0),
+        do_sample: true,
+        topk: Some(10),
+        num_beams: Some(1),
+    };
     let output_ids = tch_generate(&model, &input_ids, gc).unwrap();
     Ok(PyTensor(output_ids))
 }
