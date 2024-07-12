@@ -8,15 +8,12 @@ use tch::{self, kind::Kind, Cuda, Device, IndexOp, Tensor};
 macro_rules! len {
     ($t: expr) => {{
         let shape = $t.size();
-        let len_last_dim = shape[$t.dim() - 1];
-        len_last_dim
+        shape[$t.dim() - 1]
     }};
 }
 
 //############## NOTES #################
 //  - design pattern: make function take an impl trait as arg
-//  - TODO: add cuda support, define global device var `torch.cuda.is_available`
-//  -
 
 //note: PyTensor impls IntoPy needed by PyAny::call -> need this since model expects `torch.Tensor`
 pub fn forward(model: &PyAny, x: Tensor) -> Result<Tensor> {
@@ -30,22 +27,22 @@ pub fn forward(model: &PyAny, x: Tensor) -> Result<Tensor> {
 pub struct GenerationConfig {
     pub max_new_tokens: usize,
     pub ctx_size: usize,
-    pub temperature: Option<f32>,
+    pub temperature: f32,
     pub do_sample: bool,
     pub topk: Option<i64>,
     pub num_beams: Option<usize>,
-    // do_sample: Option<bool>,
-    // eos_token_id: Option<usize>,
+    eos_token_id: Option<usize>,
 }
 impl GenerationConfig {
     pub fn new(max_new_tokens: usize) -> Self {
         Self {
             max_new_tokens,
             ctx_size: 384,
-            temperature: Some(1.0),
+            temperature: 1.0,
             topk: None,
             do_sample: false,
             num_beams: Some(1),
+            eos_token_id: None,
         }
     }
 }
@@ -76,7 +73,7 @@ pub fn tch_generate(model: &PyAny, input_ids: &Tensor, gc: GenerationConfig) -> 
 
                     let mut mask = logits.zeros_like().to_dtype(Kind::Bool, true, false); // size bsz x n_embd
 
-                    // build bool mask
+                    // build bool mask with $index \in topk=1$
                     for i in 0..len!(idx) {
                         let _ = mask.index_put_(
                             &[Some(Tensor::from(0)), Some(idx.i((0, i)))],
@@ -86,6 +83,7 @@ pub fn tch_generate(model: &PyAny, input_ids: &Tensor, gc: GenerationConfig) -> 
                     }
 
                     // approx -float('inf')
+                    logits = logits.divide(&Tensor::from(gc.temperature));
                     logits = logits.where_self(&mask, &Tensor::from(f64::MIN));
 
                     logits.softmax(-1, Kind::Float).multinomial(1, false)
@@ -101,8 +99,7 @@ pub fn tch_generate(model: &PyAny, input_ids: &Tensor, gc: GenerationConfig) -> 
         new_tokens = Tensor::concat(&[new_tokens, tok.copy()], -1);
         input_ids = Tensor::concat(&[input_ids, tok], -1);
     }
-
-    //Ok(new_tokens.i(1..)) // first token random from empty
+    new_tokens = new_tokens.i((.., 1..)); // first token random from empty
     Ok(input_ids) // first token random from empty
 }
 
@@ -116,10 +113,11 @@ pub fn generate(model: &PyAny, input_ids: PyTensor, kwargs: Option<&PyDict>) -> 
     let gc = GenerationConfig {
         max_new_tokens: 32,
         ctx_size: 384,
-        temperature: Some(1.0),
+        temperature: 1.0,
         do_sample: true,
         topk: Some(10),
         num_beams: Some(1),
+        eos_token_id: Some(2),
     };
     let output_ids = tch_generate(&model, &input_ids, gc).unwrap();
     Ok(PyTensor(output_ids))
