@@ -3,6 +3,7 @@ use pyo3::prelude::*;
 use pyo3_tch::PyTensor;
 use std::io::{self, Write};
 use tch::{self, kind::Kind, Cuda, Device, IndexOp, Tensor};
+use pyo3::types::PyDict;
 
 use crate::gen::{len, GenerationConfig, PartialGenerate};
 
@@ -34,15 +35,29 @@ where
         while len!(input_ids) - init_len <= gc.max_new_tokens as i64 {
             (done, input_ids) = match T::partial_generate(model, input_ids, &gc) {
                 Ok(res) => res,
-                _ => panic!(),
+                Err(e) => {
+                  println!("{:?}", e);
+                  panic!();
+                }
             };
             //decode
+            //let decoded = Python::with_gil(|py|{
+            //    let kwargs = PyDict::new(py);
+            //    let _ = kwargs.set_item("skip_special_tokens", true);
+            //    
+            //    let s = tokenizer
+            //        .call_method("decode", (PyTensor(input_ids.i(0).copy()),), Some(&kwargs))
+            //        .unwrap();
+            //    s.str().unwrap().to_string_lossy().into_owned();
+            //
+            //});
             let s = tokenizer
                 .call_method("decode", (PyTensor(input_ids.i(0).copy()),), None)
                 .unwrap();
             let decoded = s.str().unwrap().to_string_lossy().into_owned();
 
-            print!("\r{:?}", decoded);
+            print!("\x1B[2J\x1B[1;1H");
+            print!("{:?}", decoded);
             io::stdout().flush().unwrap();
 
             if done {

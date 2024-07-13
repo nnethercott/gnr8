@@ -86,7 +86,7 @@ impl PartialGenerate for MultinomialSampler {
             i64::max(len!(input_ids) - gc.ctx_size as i64, 0)..len!(input_ids),
         ));
 
-        let mut logits = forward(&model, input_ids.shallow_clone())?;
+        let mut logits = forward(&model, input_ids.shallow_clone()).expect(&format!("failed fwding logits with shape {:?}", input_ids.size()));
         logits = logits.i((.., -1, ..));
 
         logits = match gc.topk.as_ref() {
@@ -163,11 +163,11 @@ impl<'a> GenerationConfig<'a> {
         });
 
         Self {
-            max_new_tokens: 32,
+            max_new_tokens: 128,
             ctx_size: 384,
-            temperature: 1.0,
+            temperature: 0.8,
             do_sample: true,
-            topk: Some(10),
+            topk: Some(48),
             num_beams: Some(1),
             eos_token_id: 2,
             sampling_strategy: None,
