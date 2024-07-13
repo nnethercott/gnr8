@@ -26,8 +26,10 @@ kwargs = {
 res = generate(model, input_ids, **kwargs)
 ```
 
+# planned features
 - [x] topk sampling
 - [x] greedy search
 - [x] temperature
 - [ ] beam search
 - [ ] length penalty
+- [ ] streaming
