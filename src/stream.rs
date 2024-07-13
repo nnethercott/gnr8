@@ -2,9 +2,6 @@ use anyhow::Result;
 use pyo3::prelude::*;
 use pyo3_tch::PyTensor;
 use std::io::{self, Write};
-use std::sync::mpsc;
-use std::thread;
-use std::time::Duration;
 use tch::{self, kind::Kind, Cuda, Device, IndexOp, Tensor};
 
 use crate::gen::{len, GenerationConfig, PartialGenerate};
@@ -32,47 +29,27 @@ where
         let init_len = len!(input_ids);
         let mut done;
 
-        // init channel
-        let (tx, rx) = mpsc::channel::<Tensor>();
-
-        let tokenizer: PyObject = gc.streamer.take().unwrap().tokenizer.into();
-        let handle = thread::spawn(move || {
-            let mut generated = Tensor::empty([1], (Kind::Int64, Device::Cpu));
-
-            while let Ok(token) = rx.recv() {
-                generated = Tensor::cat(&[generated, token.to_device(Device::Cpu)], -1);
-
-                //decode
-                let decoded = Python::with_gil(|py| {
-                    // "borrow a GIL-bound reference to the contained object."
-                    let tokenizer = tokenizer.as_ref(py);
-                    let s = tokenizer
-                        .call_method("decode", (PyTensor(generated.i(1..).copy()),), None)
-                        .unwrap();
-                    s.str().unwrap().to_string_lossy().into_owned();
-                });
-
-                print!("\r{:?}", decoded);
-                io::stdout().flush().unwrap();
-            }
-            println!("");
-        });
+        let tokenizer = gc.streamer.take().unwrap().tokenizer;
 
         while len!(input_ids) - init_len <= gc.max_new_tokens as i64 {
             (done, input_ids) = match T::partial_generate(model, input_ids, &gc) {
                 Ok(res) => res,
                 _ => panic!(),
             };
+            //decode
+            let s = tokenizer
+                .call_method("decode", (PyTensor(input_ids.i(0).copy()),), None)
+                .unwrap();
+            let decoded = s.str().unwrap().to_string_lossy().into_owned();
 
-            let _ = tx.send(input_ids.i((.., -1)).shallow_clone());
+            print!("\r{:?}", decoded);
+            io::stdout().flush().unwrap();
 
             if done {
                 break;
             }
         }
-        drop(tx);
-
-        let _ = handle.join().unwrap();
+        println!("");
 
         Ok(input_ids)
     }
