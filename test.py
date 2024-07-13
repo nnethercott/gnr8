@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+from transformers import AutoTokenizer
 
 from gnr8 import generate
 
@@ -16,10 +17,14 @@ class M(nn.Module):
 
 
 model = M().to(device)
+tokenizer = AutoTokenizer.from_pretrained("TinyLlama/TinyLlama-1.1B-Chat-v1.0")
 
 #input_ids = [random.randint(0,10) for _ in range(10)]
 input_ids = torch.randint(low=0, high=10, size = (1, 10), device=device)
-res = generate(model, input_ids)
+
+kwargs = {"tokenizer": tokenizer}
+res = generate(model, input_ids, kwargs)
+
 
 print(input_ids)
 print(res)

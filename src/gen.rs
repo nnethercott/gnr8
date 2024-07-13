@@ -7,12 +7,14 @@ use tch::{self, kind::Kind, Cuda, Device, IndexOp, Tensor};
 
 use crate::stream::*;
 
+#[macro_export]
 macro_rules! len {
     ($t: expr) => {{
         let shape = $t.size();
         shape[$t.dim() - 1]
     }};
 }
+pub use len;
 
 pub trait Generate {
     fn generate(model: &PyAny, input_ids: &Tensor, gc: GenerationConfig) -> Result<Tensor>;
@@ -42,9 +44,7 @@ pub fn forward(model: &PyAny, x: Tensor) -> Result<Tensor> {
 }
 
 #[allow(dead_code)]
-#[pyclass]
-#[derive(Clone, Debug)]
-pub struct GenerationConfig {
+pub struct GenerationConfig<'a> {
     pub max_new_tokens: usize,
     pub ctx_size: usize,
     pub temperature: f32,
@@ -53,9 +53,10 @@ pub struct GenerationConfig {
     pub num_beams: Option<usize>,
     pub eos_token_id: i64,
     pub sampling_strategy: Option<SamplingStrategy>, //defaults to multinomial
+    pub streamer: Option<Streamer<'a>>,
 }
 
-impl GenerationConfig {
+impl<'a> GenerationConfig<'a> {
     pub fn new(max_new_tokens: usize) -> Self {
         Self {
             max_new_tokens,
@@ -66,6 +67,7 @@ impl GenerationConfig {
             num_beams: Some(1),
             eos_token_id: 2,
             sampling_strategy: None,
+            streamer: None,
         }
     }
 }
@@ -153,8 +155,13 @@ where
 //     }
 // }
 
-impl GenerationConfig {
-    fn from_config(_kwargs: Option<&PyDict>) -> Self {
+impl<'a> GenerationConfig<'a> {
+    fn from_config(kwargs: Option<&'a PyDict>) -> Self {
+        let streamer = kwargs.as_ref().map(|k| {
+            let tokenizer = k.get_item("tokenizer").unwrap();
+            Streamer { tokenizer }
+        });
+
         Self {
             max_new_tokens: 32,
             ctx_size: 384,
@@ -164,6 +171,7 @@ impl GenerationConfig {
             num_beams: Some(1),
             eos_token_id: 2,
             sampling_strategy: None,
+            streamer,
         }
     }
 }
@@ -178,7 +186,7 @@ pub fn generate(model: &PyAny, input_ids: PyTensor, kwargs: Option<&PyDict>) -> 
 
     let output_ids = match gc.sampling_strategy.take() {
         //Some(SamplingStrategy::Beam) => BeamSearchSampler::generate(model, &input_ids, gc),
-        _ => MultinomialSampler::generate(model, &input_ids, gc),
+        _ => MultinomialSampler::stream_generate(model, &input_ids, gc),
     };
 
     Ok(PyTensor(output_ids.unwrap()))
