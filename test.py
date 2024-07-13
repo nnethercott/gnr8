@@ -21,9 +21,10 @@ tinyllama = AutoModelForCausalLM.from_pretrained("TinyLlama/TinyLlama-1.1B-Chat-
 model = M(tinyllama).to(device)
 
 prompt = "tell me a story about a cat"
-input_ids = tok(prompt, return_tensors = 'pt')['input_ids'].to(device)
+messages = [{"role":"user", "content": prompt}]
+input_ids = torch.tensor(tok.apply_chat_template(messages)).unsqueeze(0).to(device)
 
 kwargs = {"tokenizer": tok}
-#res = generate(model, input_ids, kwargs)
+res = generate(model, input_ids, kwargs)
 
 
