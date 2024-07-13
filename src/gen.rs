@@ -39,8 +39,10 @@ pub enum SamplingStrategy {
 
 //PyTensor impls IntoPy needed by PyAny::call
 pub fn forward(model: &PyAny, x: Tensor) -> Result<Tensor> {
-    let tensor: PyTensor = model.call((PyTensor(x),), None)?.extract()?;
-    Ok(tensor.0)
+    tch::no_grad(||{
+        let tensor: PyTensor = model.call((PyTensor(x),), None)?.extract()?;
+        Ok(tensor.0)
+    })
 }
 
 #[allow(dead_code)]
@@ -84,8 +86,11 @@ impl PartialGenerate for MultinomialSampler {
                 ..,
                 i64::max(len!(input_ids) - gc.ctx_size as i64, 0)..len!(input_ids),
             ));
+            let device = input_ids.device();
 
-            let mut logits = forward(&model, input_ids.shallow_clone()).expect(&format!("failed fwding logits with shape {:?}", input_ids.size()));
+            // store on cpu 
+            let mut new_tokens = input_ids.copy().to_device(Device::Cpu);
+            let mut logits = forward(&model, input_ids).expect(&format!("failed fwding logits")); 
             logits = logits.i((.., -1, ..));
 
             logits = match gc.topk.as_ref() {
@@ -94,14 +99,12 @@ impl PartialGenerate for MultinomialSampler {
 
                     let mut mask = logits.zeros_like().to_dtype(Kind::Bool, true, false); // size bsz x n_embd
 
-                    // build bool mask with $index \in topk=1$
-                    for i in 0..len!(idx) {
-                        let _ = mask.index_put_(
-                            &[Some(Tensor::from(0)), Some(idx.i((0, i)))],
-                            &Tensor::from(true),
-                            false,
-                        );
-                    }
+                    // Create the mask tensor
+                    let mask = Tensor::zeros_like(&logits)
+                        .to_dtype(Kind::Bool, true, false) 
+                        .to_device(logits.device())
+                        .scatter_(-1, &idx, &Tensor::ones_like(&idx).to_dtype(Kind::Bool, true, false)); 
+
 
                     // approx -float('inf')
                     logits = logits / Tensor::from(gc.temperature);
@@ -117,12 +120,12 @@ impl PartialGenerate for MultinomialSampler {
             // new_tokens = Tensor::concat(&[new_tokens, tok.copy()], -1);
             // new_tokens = new_tokens.i((.., 1..));
 
-            input_ids = Tensor::concat(&[input_ids, tok], -1);
+            new_tokens = Tensor::concat(&[new_tokens.to(device), tok], -1);
 
             // manually drop tensors 
             drop(logits);
                 
-            Ok((eos_reached, input_ids))
+            Ok((eos_reached, new_tokens))
         })
      }
 }
@@ -133,7 +136,7 @@ where
 {
     fn generate(model: &PyAny, input_ids: &Tensor, gc: GenerationConfig) -> Result<Tensor> {
         //let mut new_tokens = Tensor::empty([1, 1], (Kind::Int64, device));
-        let mut input_ids = input_ids.shallow_clone().to(input_ids.device()); //&Tensor to Tensor
+        let mut input_ids = input_ids.copy().to(input_ids.device()); //&Tensor to Tensor
         let init_len = len!(input_ids);
         let mut done;
 
@@ -166,8 +169,8 @@ impl<'a> GenerationConfig<'a> {
         });
 
         Self {
-            max_new_tokens: 128,
-            ctx_size: 384,
+            max_new_tokens: 384,
+            ctx_size: 128,
             temperature: 0.8,
             do_sample: true,
             topk: Some(48),
