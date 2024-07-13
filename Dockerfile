@@ -13,6 +13,6 @@ RUN echo 'source $HOME/.cargo/env' >> $HOME/.bashrc
 
 # install torch 
 RUN pip install torch==2.2.0 --index-url https://download.pytorch.org/whl/cu118
-RUN pip install numpy==1.26
+RUN pip install numpy==1.26 transformers
 
 CMD ["python"]

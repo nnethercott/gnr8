@@ -78,50 +78,53 @@ impl PartialGenerate for MultinomialSampler {
         mut input_ids: Tensor,
         gc: &GenerationConfig,
     ) -> Result<(bool, Tensor)> {
-        // let mut new_tokens = Tensor::empty([1, 1], (Kind::Int64, input_ids.device()));
+        tch::no_grad(||{
+            // truncate at model context window
+            input_ids = input_ids.i((
+                ..,
+                i64::max(len!(input_ids) - gc.ctx_size as i64, 0)..len!(input_ids),
+            ));
 
-        // truncate at model context window
-        input_ids = input_ids.i((
-            ..,
-            i64::max(len!(input_ids) - gc.ctx_size as i64, 0)..len!(input_ids),
-        ));
+            let mut logits = forward(&model, input_ids.shallow_clone()).expect(&format!("failed fwding logits with shape {:?}", input_ids.size()));
+            logits = logits.i((.., -1, ..));
 
-        let mut logits = forward(&model, input_ids.shallow_clone()).expect(&format!("failed fwding logits with shape {:?}", input_ids.size()));
-        logits = logits.i((.., -1, ..));
+            logits = match gc.topk.as_ref() {
+                Some(k) => {
+                    let (_, idx) = logits.topk(*k, -1, true, true);
 
-        logits = match gc.topk.as_ref() {
-            Some(k) => {
-                let (_, idx) = logits.topk(*k, -1, true, true);
+                    let mut mask = logits.zeros_like().to_dtype(Kind::Bool, true, false); // size bsz x n_embd
 
-                let mut mask = logits.zeros_like().to_dtype(Kind::Bool, true, false); // size bsz x n_embd
+                    // build bool mask with $index \in topk=1$
+                    for i in 0..len!(idx) {
+                        let _ = mask.index_put_(
+                            &[Some(Tensor::from(0)), Some(idx.i((0, i)))],
+                            &Tensor::from(true),
+                            false,
+                        );
+                    }
 
-                // build bool mask with $index \in topk=1$
-                for i in 0..len!(idx) {
-                    let _ = mask.index_put_(
-                        &[Some(Tensor::from(0)), Some(idx.i((0, i)))],
-                        &Tensor::from(true),
-                        false,
-                    );
+                    // approx -float('inf')
+                    logits = logits / Tensor::from(gc.temperature);
+                    logits.where_self(&mask, &Tensor::from(f64::MIN))
                 }
+                None => logits / Tensor::from(gc.temperature),
+            };
 
-                // approx -float('inf')
-                logits = logits / Tensor::from(gc.temperature);
-                logits.where_self(&mask, &Tensor::from(f64::MIN))
-            }
-            None => logits / Tensor::from(gc.temperature),
-        };
+            //sample from multinomial
+            let mut tok = logits.softmax(-1, Kind::Float).multinomial(1, false);
+            let eos_reached = tok == Tensor::from(gc.eos_token_id).view_(tok.size());
 
-        //sample from multinomial
-        let tok = logits.softmax(-1, Kind::Float).multinomial(1, false);
-        let eos_reached = tok == Tensor::from(gc.eos_token_id).view_(tok.size());
+            // new_tokens = Tensor::concat(&[new_tokens, tok.copy()], -1);
+            // new_tokens = new_tokens.i((.., 1..));
 
-        // new_tokens = Tensor::concat(&[new_tokens, tok.copy()], -1);
-        // new_tokens = new_tokens.i((.., 1..));
+            input_ids = Tensor::concat(&[input_ids, tok], -1);
 
-        input_ids = Tensor::concat(&[input_ids, tok], -1);
-
-        Ok((eos_reached, input_ids))
-    }
+            // manually drop tensors 
+            drop(logits);
+                
+            Ok((eos_reached, input_ids))
+        })
+     }
 }
 
 impl<T> Generate for T
@@ -145,7 +148,7 @@ where
             }
         }
 
-        Ok(input_ids)
+        Ok(input_ids.to_device(Device::Cpu))
     }
 }
 
@@ -189,5 +192,5 @@ pub fn generate(model: &PyAny, input_ids: PyTensor, kwargs: Option<&PyDict>) -> 
         _ => MultinomialSampler::stream_generate(model, &input_ids, gc),
     };
 
-    Ok(PyTensor(output_ids.unwrap()))
+    Ok(PyTensor(output_ids.unwrap().to_device(Device::Cpu)))
 }
