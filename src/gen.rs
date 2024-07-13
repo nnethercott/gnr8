@@ -87,8 +87,6 @@ impl PartialGenerate for MultinomialSampler {
         let mut logits = forward(&model, input_ids.shallow_clone())?;
         logits = logits.i((.., -1, ..));
 
-        let tok: Tensor;
-
         logits = match gc.topk.as_ref() {
             Some(k) => {
                 let (_, idx) = logits.topk(*k, -1, true, true);
@@ -105,16 +103,15 @@ impl PartialGenerate for MultinomialSampler {
                 }
 
                 // approx -float('inf')
-                logits = logits.divide(&Tensor::from(gc.temperature)); //divide first to avoid
-                                                                       //underflow
+                logits = logits / Tensor::from(gc.temperature);
                 logits.where_self(&mask, &Tensor::from(f64::MIN))
             }
-            None => logits.divide(&Tensor::from(gc.temperature)),
+            None => logits / Tensor::from(gc.temperature),
         };
 
         //sample from multinomial
-        tok = logits.softmax(-1, Kind::Float).multinomial(1, false);
-        let eos_reached = tok == Tensor::from(gc.eos_token_id);
+        let tok = logits.softmax(-1, Kind::Float).multinomial(1, false);
+        let eos_reached = tok == Tensor::from(gc.eos_token_id).view_(tok.size());
 
         // new_tokens = Tensor::concat(&[new_tokens, tok.copy()], -1);
         // new_tokens = new_tokens.i((.., 1..));
@@ -163,7 +160,7 @@ impl GenerationConfig {
             ctx_size: 384,
             temperature: 1.0,
             do_sample: true,
-            topk: Some(48),
+            topk: Some(10),
             num_beams: Some(1),
             eos_token_id: 2,
             sampling_strategy: None,
