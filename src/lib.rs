@@ -1,7 +1,8 @@
 use pyo3::prelude::*;
 use pyo3::types::PyAny;
-use pyo3_tch::{wrap_tch_err, PyTensor};
-use tch;
+use pyo3_tch::{wrap_tch_err, PyTensor, };
+
+use tch::{self, IndexOp, Tensor, Device};
 
 pub mod gen;
 pub mod stream;

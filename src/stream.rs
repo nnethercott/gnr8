@@ -48,11 +48,6 @@ where
                 let s = tokenizer
                     .call_method("decode", (PyTensor(input_ids.i(0).copy()),), Some(&kwargs))
                     .unwrap();
-                s.str().unwrap().to_string_lossy().into_owned();
-
-                let s = tokenizer
-                    .call_method("decode", (PyTensor(input_ids.i(0).copy()),), None)
-                    .unwrap();
                 let decoded = s.str().unwrap().to_string_lossy().into_owned();
 
                 print!("\x1B[2J\x1B[1;1H");

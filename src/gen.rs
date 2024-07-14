@@ -115,7 +115,7 @@ impl PartialGenerate for MultinomialSampler {
 
             //sample from multinomial
             let mut tok = logits.softmax(-1, Kind::Float).multinomial(1, false);
-            let eos_reached = tok == Tensor::from(gc.eos_token_id).view_(tok.size());
+            let eos_reached = tok == Tensor::from(gc.eos_token_id).view_(tok.size()).to_device(tok.device());
 
             // new_tokens = Tensor::concat(&[new_tokens, tok.copy()], -1);
             // new_tokens = new_tokens.i((.., 1..));
@@ -169,11 +169,11 @@ impl<'a> GenerationConfig<'a> {
         });
 
         Self {
-            max_new_tokens: 384,
-            ctx_size: 128,
-            temperature: 0.8,
+            max_new_tokens: 256,
+            ctx_size: 384,
+            temperature: 0.7,
             do_sample: true,
-            topk: Some(48),
+            topk: Some(16),
             num_beams: Some(1),
             eos_token_id: 2,
             sampling_strategy: None,
