@@ -2,6 +2,8 @@
 
 using [tch-rs](https://github.com/LaurentMazare/tch-rs) for llm generate util in rust
 
+![alt text](https://github.com/nnethercott/gnr8/blob/main/media/demo.gif?raw=true)
+
 
 # (intended) usage
 
