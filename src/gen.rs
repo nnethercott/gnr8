@@ -62,6 +62,7 @@ pub struct GenerationConfig {
     #[pyo3(get, set)]
     pub eos_token_id: i64,
     pub sampling_strategy: SamplingStrategy, //don't expose
+    pub stream: bool,
     #[pyo3(get, set)]
     pub tokenizer: Option<PyObject>,
 }
@@ -77,6 +78,7 @@ impl GenerationConfig {
         topk: Option<i64>,
         num_beams: Option<usize>,
         eos_token_id: Option<i64>,
+        stream: Option<bool>,
         tokenizer: Option<PyObject>,
     ) -> Self {
         let do_sample = do_sample.unwrap_or(true);
@@ -96,6 +98,7 @@ impl GenerationConfig {
             num_beams,
             eos_token_id: eos_token_id.unwrap_or(-1), // no early stop
             sampling_strategy,
+            stream: stream.unwrap_or(false),
             tokenizer,
         }
     }
@@ -202,7 +205,14 @@ pub fn generate(model: &PyAny, input_ids: PyTensor, gc: GenerationConfig) -> PyR
 
     let output_ids = match gc.sampling_strategy {
         SamplingStrategy::Beam(_) => BeamSearchSampler::generate(model, &input_ids, gc), //FIXME: add logic for n==1 and n>1
-        _ => MultinomialSampler::stream_generate(model, &input_ids, gc),
+        SamplingStrategy::Random => {
+            if gc.stream{
+                MultinomialSampler::stream_generate(model, &input_ids, gc)
+            }
+            else{
+                MultinomialSampler::generate(model, &input_ids, gc)
+            }
+        }
     };
 
     Ok(PyTensor(output_ids.unwrap().to_device(Device::Cpu)))
