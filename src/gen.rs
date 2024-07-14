@@ -2,8 +2,7 @@ use anyhow::Result;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict};
 use pyo3_tch::PyTensor;
-use std::convert::TryFrom;
-use tch::{self, kind::Kind, Cuda, Device, IndexOp, Tensor};
+use tch::{self, kind::Kind, Device, IndexOp, Tensor};
 
 use crate::stream::*;
 
@@ -33,43 +32,71 @@ pub struct MultinomialSampler;
 
 #[derive(Debug, Clone)]
 pub enum SamplingStrategy {
-    Beam,
+    Beam(usize),
     Random,
 }
 
 //PyTensor impls IntoPy needed by PyAny::call
 pub fn forward(model: &PyAny, x: Tensor) -> Result<Tensor> {
-    tch::no_grad(||{
+    tch::no_grad(|| {
         let tensor: PyTensor = model.call((PyTensor(x),), None)?.extract()?;
         Ok(tensor.0)
     })
 }
 
-#[allow(dead_code)]
-pub struct GenerationConfig<'a> {
+#[pyclass]
+#[derive(Clone, Debug)]
+pub struct GenerationConfig {
+    #[pyo3(get, set)]
     pub max_new_tokens: usize,
+    #[pyo3(get, set)]
     pub ctx_size: usize,
+    #[pyo3(get, set)]
     pub temperature: f32,
+    #[pyo3(get, set)]
     pub do_sample: bool,
+    #[pyo3(get, set)]
     pub topk: Option<i64>,
-    pub num_beams: Option<usize>,
+    #[pyo3(get, set)]
+    pub num_beams: usize,
+    #[pyo3(get, set)]
     pub eos_token_id: i64,
-    pub sampling_strategy: Option<SamplingStrategy>, //defaults to multinomial
-    pub streamer: Option<Streamer<'a>>,
+    pub sampling_strategy: SamplingStrategy, //don't expose
+    #[pyo3(get, set)]
+    pub tokenizer: Option<PyObject>,
 }
 
-impl<'a> GenerationConfig<'a> {
-    pub fn new(max_new_tokens: usize) -> Self {
+#[pymethods]
+impl GenerationConfig {
+    #[new]
+    pub fn new(
+        max_new_tokens: usize,
+        ctx_size: Option<usize>,
+        temperature: Option<f32>,
+        do_sample: Option<bool>,
+        topk: Option<i64>,
+        num_beams: Option<usize>,
+        eos_token_id: Option<i64>,
+        tokenizer: Option<PyObject>,
+    ) -> Self {
+        let do_sample = do_sample.unwrap_or(true);
+        let num_beams = num_beams.unwrap_or(1);
+        let sampling_strategy = if do_sample {
+            SamplingStrategy::Random
+        } else {
+            SamplingStrategy::Beam(num_beams)
+        };
+
         Self {
             max_new_tokens,
-            ctx_size: 384,
-            temperature: 1.0,
-            topk: None,
-            do_sample: false,
-            num_beams: Some(1),
-            eos_token_id: 2,
-            sampling_strategy: None,
-            streamer: None,
+            ctx_size: ctx_size.unwrap_or(384),
+            temperature: temperature.unwrap_or(1.0),
+            topk,
+            do_sample,
+            num_beams,
+            eos_token_id: eos_token_id.unwrap_or(-1), // no early stop
+            sampling_strategy,
+            tokenizer,
         }
     }
 }
@@ -80,7 +107,7 @@ impl PartialGenerate for MultinomialSampler {
         mut input_ids: Tensor,
         gc: &GenerationConfig,
     ) -> Result<(bool, Tensor)> {
-        tch::no_grad(||{
+        tch::no_grad(|| {
             // truncate at model context window
             input_ids = input_ids.i((
                 ..,
@@ -88,9 +115,10 @@ impl PartialGenerate for MultinomialSampler {
             ));
             let device = input_ids.device();
 
-            // store on cpu 
+            // store on cpu
             let mut new_tokens = input_ids.copy().to_device(Device::Cpu);
-            let mut logits = forward(&model, input_ids).expect(&format!("failed fwding logits")); 
+            let mut logits =
+                forward(&model, input_ids).expect(&format!("failed forwarding logits"));
             logits = logits.i((.., -1, ..));
 
             logits = match gc.topk.as_ref() {
@@ -101,10 +129,13 @@ impl PartialGenerate for MultinomialSampler {
 
                     // Create the mask tensor
                     let mask = Tensor::zeros_like(&logits)
-                        .to_dtype(Kind::Bool, true, false) 
+                        .to_dtype(Kind::Bool, true, false)
                         .to_device(logits.device())
-                        .scatter_(-1, &idx, &Tensor::ones_like(&idx).to_dtype(Kind::Bool, true, false)); 
-
+                        .scatter_(
+                            -1,
+                            &idx,
+                            &Tensor::ones_like(&idx).to_dtype(Kind::Bool, true, false),
+                        );
 
                     // approx -float('inf')
                     logits = logits / Tensor::from(gc.temperature);
@@ -115,19 +146,22 @@ impl PartialGenerate for MultinomialSampler {
 
             //sample from multinomial
             let mut tok = logits.softmax(-1, Kind::Float).multinomial(1, false);
-            let eos_reached = tok == Tensor::from(gc.eos_token_id).view_(tok.size()).to_device(tok.device());
+            let eos_reached = tok
+                == Tensor::from(gc.eos_token_id)
+                    .view_(tok.size())
+                    .to_device(tok.device());
 
             // new_tokens = Tensor::concat(&[new_tokens, tok.copy()], -1);
             // new_tokens = new_tokens.i((.., 1..));
 
             new_tokens = Tensor::concat(&[new_tokens.to(device), tok], -1);
 
-            // manually drop tensors 
+            // manually drop tensors
             drop(logits);
-                
+
             Ok((eos_reached, new_tokens))
         })
-     }
+    }
 }
 
 impl<T> Generate for T
@@ -155,43 +189,19 @@ where
     }
 }
 
-// impl Generate for BeamSearchSampler {
-//     fn generate(model: &PyAny, input_ids: &Tensor, gc: GenerationConfig) -> Result<Tensor> {
-//         todo!();
-//     }
-// }
-
-impl<'a> GenerationConfig<'a> {
-    fn from_config(kwargs: Option<&'a PyDict>) -> Self {
-        let streamer = kwargs.as_ref().map(|k| {
-            let tokenizer = k.get_item("tokenizer").unwrap();
-            Streamer { tokenizer }
-        });
-
-        Self {
-            max_new_tokens: 256,
-            ctx_size: 384,
-            temperature: 0.7,
-            do_sample: true,
-            topk: Some(16),
-            num_beams: Some(1),
-            eos_token_id: 2,
-            sampling_strategy: None,
-            streamer,
-        }
+impl Generate for BeamSearchSampler {
+    fn generate(model: &PyAny, input_ids: &Tensor, gc: GenerationConfig) -> Result<Tensor> {
+        todo!();
     }
 }
 
 //pyfunction wrapper around tch_generate
 #[pyfunction]
-pub fn generate(model: &PyAny, input_ids: PyTensor, kwargs: Option<&PyDict>) -> PyResult<PyTensor> {
-    //TODO: build generation config from kwargs -> GenerationConfig::from(thing) thing
-    //isinstance(PyDict)
+pub fn generate(model: &PyAny, input_ids: PyTensor, gc: GenerationConfig) -> PyResult<PyTensor> {
+    // let mut gc = GenerationConfig::from_config(kwargs);
 
-    let mut gc = GenerationConfig::from_config(kwargs);
-
-    let output_ids = match gc.sampling_strategy.take() {
-        //Some(SamplingStrategy::Beam) => BeamSearchSampler::generate(model, &input_ids, gc),
+    let output_ids = match gc.sampling_strategy {
+        SamplingStrategy::Beam(_) => BeamSearchSampler::generate(model, &input_ids, gc), //FIXME: add logic for n==1 and n>1
         _ => MultinomialSampler::stream_generate(model, &input_ids, gc),
     };
 

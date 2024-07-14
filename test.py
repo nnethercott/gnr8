@@ -17,27 +17,28 @@ class M(nn.Module):
 
 
 tok = AutoTokenizer.from_pretrained("TinyLlama/TinyLlama-1.1B-Chat-v1.0")
-tinyllama = AutoModelForCausalLM.from_pretrained("TinyLlama/TinyLlama-1.1B-Chat-v1.0")
-model = M(tinyllama).to(device)
-model = model.eval()
-
-
-parser = argparse.ArgumentParser()
-parser.add_argument("--prompt")
-args = parser.parse_args()
-prompt = args.prompt
-
-messages = [{"role":"user", "content": prompt}]
-input_ids = torch.tensor(tok.apply_chat_template(messages)).unsqueeze(0)
-
-kwargs = {"tokenizer": tok}
+#tinyllama = AutoModelForCausalLM.from_pretrained("TinyLlama/TinyLlama-1.1B-Chat-v1.0")
+#model = M(tinyllama).to(device)
+#model = model.eval()
+#
+#
+#parser = argparse.ArgumentParser()
+#parser.add_argument("--prompt")
+#args = parser.parse_args()
+#prompt = args.prompt
+#
+#messages = [{"role":"user", "content": prompt}]
+#input_ids = torch.tensor(tok.apply_chat_template(messages)).unsqueeze(0)
+#
+#kwargs = {"tokenizer": tok}
 
 #ids = model.model.generate(input_ids = input_ids, temperature=1.3, top_k = 32, do_sample = True, min_new_tokens=384, max_new_tokens = 385)
 
-res = gnr8.generate(model, input_ids.to(device), kwargs)
+gc = gnr8.GenerationConfig(max_new_tokens = 128, tokenizer = tok)
+#res = gnr8.generate(model, input_ids.to(device), kwargs)
 
 #with torch.no_grad():
 #    gnr8.foo(model, input_ids)
 
-print("\x1B[2J\x1B[1;1H")
-print(tok.decode(res[0][input_ids.shape[1]:]).strip())
+#print("\x1B[2J\x1B[1;1H")
+#print(tok.decode(res[0][input_ids.shape[1]:]).strip())
