@@ -7,6 +7,13 @@ using [tch-rs](https://github.com/LaurentMazare/tch-rs) for llm generate util in
 # install 
 `gnr8` not yet on pypi so right now building is done with [cargo](https://www.rust-lang.org/tools/install). Additionally, make sure you have `libtorch` properly installed on your system at version 2.2.0 and numpy<2. For installing and linking the C++ api for torch needed by tch-rs follow the steps included on the [project's readme](https://github.com/LaurentMazare/tch-rs).
 
+## running with docker 
+You can use the pre-built `libgnr8.so` shared object by running the `nnethercott/gnr8` docker image. If you have [nvidia container runtime](https://developer.nvidia.com/container-runtime) installed then the container can access your gpus. 
+
+```bash 
+docker run --runtime=nvidia --gpus all -it -v path-to-your-pyscript:/app gnr8 /bin/bash
+```
+
 With the above steps done you can install the project with:
 ```bash 
 git clone git@github.com:nnethercott/gnr8.git && cd gnr8
