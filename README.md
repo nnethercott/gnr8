@@ -11,7 +11,7 @@ using [tch-rs](https://github.com/LaurentMazare/tch-rs) for llm generate util in
 You can use the pre-built `libgnr8.so` shared object by running the `nnethercott/gnr8` docker image. If you have [nvidia container runtime](https://developer.nvidia.com/container-runtime) installed then the container can access your gpus. 
 
 ```bash 
-docker run --runtime=nvidia --gpus all -it -v path-to-your-pyscript:/app gnr8 /bin/bash
+docker run --runtime=nvidia --gpus all -it -v path-to-your-pyscript:/app nnethercott/gnr8:latest /bin/bash
 ```
 
 With the above steps done you can install the project with:
