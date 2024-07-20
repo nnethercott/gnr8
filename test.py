@@ -1,4 +1,5 @@
 import argparse
+import time
 
 import torch
 from torch import nn
@@ -44,7 +45,10 @@ gc = gnr8.GenerationConfig(
     tokenizer=tok,
 )
 
+now = time.time()
 new_tokens = gnr8.generate(model, input_ids.to(device), gc)
+print(f"generated in {time.time() - now} s")
+
 print(tok.batch_decode(input_ids))
 print(tok.decode(new_tokens))
 
