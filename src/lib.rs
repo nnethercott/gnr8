@@ -1,8 +1,4 @@
 use pyo3::prelude::*;
-use pyo3::types::PyAny;
-use pyo3_tch::{wrap_tch_err, PyTensor};
-
-use tch::{self, Device, IndexOp, Tensor};
 
 pub mod gen;
 pub mod stream;
@@ -13,7 +9,7 @@ use crate::gen::*;
 #[pyo3(name = "gnr8")]
 fn gnr8(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     // py.import("torch")?;
-    m.add_function(wrap_pyfunction!(gen::generate, m)?)?;
+    m.add_function(wrap_pyfunction!(gen::generate_token, m)?)?;
     m.add_class::<gen::GenerationConfig>()?;
     Ok(())
 }

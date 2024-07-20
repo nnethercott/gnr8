@@ -17,3 +17,6 @@ torch-sys = "0.15.0"
 tch = "0.15"
 anyhow = "1.0.86"
 
+[tool.maturin]
+python-source = "gnr8"
+
