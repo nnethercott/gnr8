@@ -15,16 +15,8 @@ macro_rules! len {
 }
 pub use len;
 
-pub trait Generate {
-    fn generate(model: &PyAny, input_ids: &Tensor, gc: GenerationConfig) -> Result<Tensor>;
-}
-
 pub trait PartialGenerate {
-    fn partial_generate(
-        model: &PyAny,
-        input_ids: Tensor,
-        gc: &GenerationConfig,
-    ) -> Result<(bool, Tensor)>;
+    fn partial_generate(logits: Tensor, gc: &GenerationConfig) -> Result<(bool, Tensor)>;
 }
 
 pub struct BeamSearchSampler;
@@ -34,14 +26,6 @@ pub struct MultinomialSampler;
 pub enum SamplingStrategy {
     Beam(usize),
     Random,
-}
-
-//PyTensor impls IntoPy needed by PyAny::call
-pub fn forward(model: &PyAny, x: Tensor) -> Result<Tensor> {
-    tch::no_grad(|| {
-        let tensor: PyTensor = model.call((PyTensor(x),), None)?.extract()?;
-        Ok(tensor.0)
-    })
 }
 
 #[pyclass]
@@ -106,21 +90,7 @@ impl GenerationConfig {
 }
 
 impl PartialGenerate for MultinomialSampler {
-    fn partial_generate(
-        model: &PyAny,
-        mut input_ids: Tensor,
-        gc: &GenerationConfig,
-    ) -> Result<(bool, Tensor)> {
-        // truncate at model context window
-        input_ids = input_ids.i((
-            ..,
-            i64::max(len!(input_ids) - gc.ctx_size as i64, 0)..len!(input_ids),
-        ));
-        let device = input_ids.device();
-
-        // store on cpu
-        let mut new_tokens = input_ids.copy().to_device(Device::Cpu);
-        let mut logits = forward(&model, input_ids).expect(&format!("failed forwarding logits"));
+    fn partial_generate(mut logits: Tensor, gc: &GenerationConfig) -> Result<(bool, Tensor)> {
         logits = logits.i((.., -1, ..));
 
         logits = match gc.topk.as_ref() {
@@ -151,56 +121,15 @@ impl PartialGenerate for MultinomialSampler {
                 .view_(tok.size())
                 .to_device(tok.device());
 
-        // new_tokens = Tensor::concat(&[new_tokens, tok.copy()], -1);
-        // new_tokens = new_tokens.i((.., 1..));
-
-        new_tokens = Tensor::concat(&[new_tokens.to(device), tok], -1);
-
-        // manually drop tensors
         drop(logits);
 
-        Ok((eos_reached, new_tokens))
-    }
-}
-
-impl<T> Generate for T
-where
-    T: PartialGenerate,
-{
-    fn generate(model: &PyAny, input_ids: &Tensor, gc: GenerationConfig) -> Result<Tensor> {
-        //let mut new_tokens = Tensor::empty([1, 1], (Kind::Int64, device));
-        let mut input_ids = input_ids.copy().to(input_ids.device()); //&Tensor to Tensor
-        let init_len = len!(input_ids);
-        let mut done;
-
-        while len!(input_ids) - init_len <= gc.max_new_tokens as i64 {
-            (done, input_ids) = match T::partial_generate(model, input_ids, &gc) {
-                Ok(res) => res,
-                _ => panic!(),
-            };
-
-            if done {
-                break;
-            }
-        }
-
-        Ok(input_ids.to_device(Device::Cpu))
-    }
-}
-
-impl Generate for BeamSearchSampler {
-    fn generate(model: &PyAny, input_ids: &Tensor, gc: GenerationConfig) -> Result<Tensor> {
-        todo!();
+        Ok((eos_reached, tok))
     }
 }
 
 //pyfunction wrapper around tch_generate
 #[pyfunction]
-pub fn generate_token(
-    model: &PyAny,
-    mut input_ids: PyTensor,
-    gc: &GenerationConfig,
-) -> PyResult<(bool, PyTensor)> {
+pub fn generate_token(mut logits: PyTensor, gc: &GenerationConfig) -> PyResult<(bool, PyTensor)> {
     //bleh
     let (done, next_token) = match gc.sampling_strategy {
         SamplingStrategy::Beam(_) => {
@@ -208,8 +137,9 @@ pub fn generate_token(
             todo!()
         }
         SamplingStrategy::Random => {
-            let input_ids = input_ids.0;
-            MultinomialSampler::partial_generate(model, input_ids, gc)
+            // PyTensor -> Tensor
+            let logits = logits.0;
+            MultinomialSampler::partial_generate(logits, gc)
                 .unwrap_or((true, Tensor::from(gc.eos_token_id)))
         }
     };
