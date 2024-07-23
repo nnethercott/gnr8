@@ -62,6 +62,7 @@ pub struct GenerationConfig {
     #[pyo3(get, set)]
     pub eos_token_id: i64,
     pub sampling_strategy: SamplingStrategy, //don't expose
+    #[pyo3(get, set)]
     pub stream: bool,
     #[pyo3(get, set)]
     pub tokenizer: Option<PyObject>,
