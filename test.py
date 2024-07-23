@@ -28,7 +28,7 @@ model = model.eval()
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
-    "--prompt", "-p", type=str, default="what is the capital of canada?"
+    "--prompt", "-p", type=str, default="tell me a funny story please."
 )
 args = parser.parse_args()
 prompt = args.prompt
@@ -37,7 +37,7 @@ messages = [{"role": "user", "content": prompt}]
 input_ids = torch.tensor(tok.apply_chat_template(messages)).unsqueeze(0)
 
 gc = gnr8.GenerationConfig(
-    max_new_tokens=16,
+    max_new_tokens=256,
     temperature=1.3,
     do_sample=True,
     topk=48,
@@ -48,7 +48,9 @@ gc = gnr8.GenerationConfig(
 
 now = time.time()
 new_tokens = gnr8.generate(model, input_ids.to(device), gc)
-print(f"generated in {time.time() - now} s")
+elapsed = time.time()-now
+print(f"generated in {elapsed} s")
+print(f"tok/s {len(new_tokens)/elapsed}")
 
 print(tok.batch_decode(input_ids))
 print(tok.decode(new_tokens))
