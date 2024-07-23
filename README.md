@@ -2,32 +2,73 @@
 
 using [tch-rs](https://github.com/LaurentMazare/tch-rs) for llm generate util in rust
 
-# usage
+![alt text](https://github.com/nnethercott/gnr8/blob/main/media/demo.gif?raw=true)
+
+# install 
+`gnr8` not yet on pypi so right now building is done with [cargo](https://www.rust-lang.org/tools/install). Additionally, make sure you have `libtorch` properly installed on your system at version 2.2.0 and numpy<2. For installing and linking the C++ api for torch needed by tch-rs follow the steps included on the [project's readme](https://github.com/LaurentMazare/tch-rs).
+
+With the above steps done you can install the project with:
+```bash 
+git clone git@github.com:nnethercott/gnr8.git && cd gnr8
+cargo build && cp target/debug/libgnr8.so gnr8.so
+echo "testing the package..."
+python test.py
+```
+
+# (intended) usage
 
 import `gnr8` directly in your torch application:
 
 ```python
-from gnr8 import generate
 import torch
 from torch import nn
+from transformers import AutoTokenizer, AutoModelForCausalLM
+import gnr8
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-model = nn.Embedding(10, 36).to(device)
-input_ids = torch.randint(low=0, high=9, size = (1, 16), device=device)
+# get any AutoModelForCausalLM from huggingface 
+model_id="TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+tok = AutoTokenizer.from_pretrained(model_id)
+tinyllama = AutoModelForCausalLM.from_pretrained(model_id)
 
-kwargs = {
-    'max_new_tokens': 64,
-    'do_sample': True,
-    'topk': 32,
-    'temperature': 1.3,
-}
+# wrapper for hf model as `gnr8.generate` expects model.__call__ to yield logits not dict 
+class M(nn.Module):
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
 
-res = generate(model, input_ids, **kwargs)
+    def forward(self, x):
+        x = self.model(x)['logits']
+        return x 
+
+model = M(tinyllama).to(device)
+model = model.eval()
+
+messages = [{"role":"user", "content": "tell me a funny story."}]
+input_ids = torch.tensor(tok.apply_chat_template(messages)).unsqueeze(0)
+
+generation_config = gnr8.GenerationConfig(
+    max_new_tokens = 128, 
+    temperature=1.3,
+    do_sample=True, 
+    topk = 48,
+    stream = False,
+    tokenizer=tok,
+)
+
+generated = gnr8.generate(model, input_ids.to(device), generation_config)
+print(tok.batch_decode(generated))
 ```
 
+# planned features
 - [x] topk sampling
 - [x] greedy search
 - [x] temperature
 - [ ] beam search
 - [ ] length penalty
+- [x] streaming
+
+# misc todos 
+* solve cuda memory leak when calling model from rust-side 
+* split single thread stream into dual-thread with `std::sync::mpsc::channel`

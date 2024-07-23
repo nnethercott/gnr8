@@ -14,7 +14,7 @@ RUN curl https://sh.rustup.rs -sSf | bash -s -- -y && \
 
 # Install torch and numpy
 RUN pip install torch==2.2.0 --index-url https://download.pytorch.org/whl/cu118
-RUN pip install numpy==1.26
+RUN pip install numpy==1.26 transformers
 
 # Clone the repository and build the project
 RUN git clone https://github.com/nnethercott/gnr8.git && \
