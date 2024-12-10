@@ -1,6 +1,6 @@
 # gnr8
 
-using [tch-rs](https://github.com/LaurentMazare/tch-rs) for llm generate util in rust
+using [tch-rs](https://github.com/LaurentMazare/tch-rs) to implement various LLM generation strategies with python bindings. Works with any `AutoModelForCausalLM` from hugging face. 
 
 ![alt text](https://github.com/nnethercott/gnr8/blob/main/media/demo.gif?raw=true)
 
