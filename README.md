@@ -5,7 +5,7 @@ using [tch-rs](https://github.com/LaurentMazare/tch-rs) to implement various LLM
 ![alt text](https://github.com/nnethercott/gnr8/blob/main/media/demo.gif?raw=true)
 
 # install 
-`gnr8` not yet on pypi so right now building is done with [cargo](https://www.rust-lang.org/tools/install). Additionally, make sure you have `libtorch` properly installed on your system at version 2.2.0 and numpy<2. For installing and linking the C++ api for torch needed by tch-rs follow the steps included on the [project's readme](https://github.com/LaurentMazare/tch-rs).
+Building is done with [cargo](https://www.rust-lang.org/tools/install). Additionally, make sure you have `libtorch` properly installed on your system at version 2.2.0 and numpy<2. For installing and linking the C++ api for torch needed by tch-rs follow the steps included on the [project's readme](https://github.com/LaurentMazare/tch-rs).
 
 With the above steps done you can install the project with:
 ```bash 
